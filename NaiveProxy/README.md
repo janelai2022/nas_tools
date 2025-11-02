@@ -174,7 +174,7 @@ GCP / 阿里云 / 腾讯云 防火墙放行 80/443；
 curl 一直超时	防火墙或 Cloudflare 未关闭代理	关闭“橙云 (Proxy)”，仅保留 DNS 模式
 🪪 License
 
-MIT License © [你的GitHub账号]
+MIT License © [janelai2022]
 
 ✨ 作者提示
 
@@ -196,7 +196,7 @@ BBR 优化
 
 自动更新功能
 
-🧩 作者：@你的GitHub账号
+🧩 作者：@janelai2022
 
 
 ---
@@ -217,7 +217,7 @@ GitHub 会自动识别并显示这个 README。
 
 > 🚀 快速安装：  
 > ```bash  
-> curl -fsSL https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main/NaiveProxy/do.sh | bash  
+> curl -fsSL https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh | bash  
 > ```  
 
 ---
