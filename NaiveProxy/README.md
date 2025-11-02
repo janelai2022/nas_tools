@@ -34,7 +34,7 @@
 
 ## 🪄 一键安装命令
 
-请将以下命令中的 `<你的GitHub账号>` 替换为你自己的 GitHub 用户名：
+
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main/NaiveProxy/do.sh | bash
+curl -fsSL https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh | bash
