@@ -7,8 +7,6 @@
 
 ## 🚀 一键安装命令
 
-请将以下命令中的 `<你的GitHub账号>` 替换为你自己的 GitHub 用户名：
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh | bash
 ````
@@ -147,7 +145,7 @@ naive 3
 ## 🪪 License
 
 MIT License © 2025
-由 [Netor Lai](https://github.com/janelai2022) 整理优化，
+由 [JaneLai](https://github.com/janelai2022) 整理优化，
 在 [imajeason/nas_tools](https://github.com/imajeason/nas_tools) 原版基础上改进。
 支持 GCP / Oracle / Vultr / 阿里云 / 腾讯云 等主流 VPS 环境。
 
