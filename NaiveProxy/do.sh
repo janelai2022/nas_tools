@@ -30,7 +30,7 @@ uuid_gen() {
 }
 
 # ====== 仅装缺少的依赖 ======
-install_if_missing() { local pkg cmd; pkg="$1"; cmd="$2"; command -v "$cmd" >/dev/null 2>&1 || apt-get install -y "$pkg"; }
+install_if_missing() { local pkg="$1" cmd="$2"; command -v "$cmd" >/dev/null 2>&1 || apt-get install -y "$pkg"; }
 need_pkgs() {
   apt-get update -y
   install_if_missing curl curl
@@ -46,29 +46,39 @@ need_pkgs() {
   install_if_missing nano nano || true
 }
 
-# ====== 自安装（下载本体 + 写 wrapper，带校验） ======
+# ====== 自安装（下载本体 + 写 wrapper，带校验；修复 tmpf 未定义） ======
 self_install() {
   mkdir -p "$INSTALL_DIR"
 
-  if [[ "$SCRIPT_URL" == *"<YOUR_GITHUB>"* || "$SCRIPT_URL" == *"<你的GitHub账号>"* ]]; then
-    echo -e "${RED}[错误] SCRIPT_URL 仍是占位符，请先替换为你仓库的 RAW 链接。${NC}"
+  # 0) 保护性 trap：只有 tmpf 非空才清理
+  local tmpf=""; trap '[[ -n "${tmpf:-}" ]] && rm -f "$tmpf"' EXIT
+
+  # 1) 检查 SCRIPT_URL 是否已被替换
+  if [[ "${SCRIPT_URL:-}" == *"<YOUR_GITHUB>"* || "${SCRIPT_URL:-}" == *"<你的GitHub账号>"* || -z "${SCRIPT_URL:-}" ]]; then
+    echo -e "${RED}[错误] SCRIPT_URL 仍是占位符或为空，请先替换为你仓库的 RAW 链接。${NC}"
     echo "示例：https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main/NaiveProxy/do.sh"
     exit 1
   fi
 
-  local tmpf; tmpf="$(mktemp)"; trap 'rm -f "$tmpf"' EXIT
+  # 2) 下载到临时文件并校验
+  tmpf="$(mktemp)"
   if ! curl -fsSL "$SCRIPT_URL" -o "$tmpf"; then
-    echo -e "${RED}[错误] 无法下载 $SCRIPT_URL，请检查网络/链接是否正确。${NC}"; exit 1
+    echo -e "${RED}[错误] 无法下载 $SCRIPT_URL，请检查网络/链接是否正确。${NC}"
+    exit 1
   fi
+
+  # 3) 防 CRLF、校验体积（避免 404/错误页）
   sed -i 's/\r$//' "$tmpf"
   local sz; sz="$(wc -c <"$tmpf" || echo 0)"
   if (( sz < 8192 )); then
     echo -e "${RED}[错误] 下载到的脚本体积异常（${sz}B < 8KB），多半是 RAW 链接不对或仓库未更新。${NC}"
     exit 1
   fi
+
+  # 4) 落地本体
   install -m 0755 "$tmpf" "$SCRIPT_PATH"
 
-  # wrapper 用绝对路径 + 原样 heredoc，最稳
+  # 5) 写 wrapper（用绝对路径 + 原样 heredoc，避免变量提前展开）
   cat >"$WRAPPER_BIN" <<'WRAP'
 #!/usr/bin/env bash
 exec /opt/naive/naive.sh internal "$@"
@@ -134,7 +144,7 @@ build_caddy_if_needed() {
   install -m 0755 caddy "$CADDY_BIN"
 }
 
-# ====== 写入 Caddyfile（修正 tls 语法为区块 tls { }） ======
+# ====== 写入 Caddyfile（tls 采用区块 tls { }） ======
 write_caddyfile() {
   mkdir -p "$CADDY_DIR" /var/www/html /var/lib/caddy
   id -u caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
@@ -198,9 +208,9 @@ SERVICE
 }
 
 # ====== 输入校验 ======
-validate_domain() { [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; }
-validate_port()   { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 && $1 != 80 )); }
-validate_email()  { [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
+validate_domain() { [[ "${1:-}" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; }
+validate_port()   { [[ "${1:-}" =~ ^[0-9]+$ ]] && (( ${1:-0} >= 1 && ${1:-0} <= 65535 && ${1:-0} != 80 )); }
+validate_email()  { [[ "${1:-}" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
 
 # ====== 安装/更新 ======
 install_or_update() {
