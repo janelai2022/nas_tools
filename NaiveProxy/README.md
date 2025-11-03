@@ -14,15 +14,15 @@ curl -fsSL https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main
 ```
 安装完成后会出现以下红字提示：
 naive 命令安装完毕，请使用 naive 进行操作。
+
 🧭 菜单操作界面
 
 安装完成后执行：
-
 naive
 
 
-将显示以下菜单：
 
+将显示以下菜单：
 ........... Naiveproxy 一键安装脚本 & 管理脚本 Install shell. ..........
 1．安装/更新 Install/Update
 2．显示信息 Show Info
