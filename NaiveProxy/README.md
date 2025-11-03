@@ -10,7 +10,7 @@
 请将以下命令中的 `<你的GitHub账号>` 替换为你自己的 GitHub 用户名：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main/NaiveProxy/do.sh | bash
+curl -fsSL https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh | bash
 ````
 
 安装完成后会出现以下红字提示：
@@ -147,7 +147,7 @@ naive 3
 ## 🪪 License
 
 MIT License © 2025
-由 [Netor Lai](https://github.com/netorlai) 整理优化，
+由 [Netor Lai](https://github.com/janelai2022) 整理优化，
 在 [imajeason/nas_tools](https://github.com/imajeason/nas_tools) 原版基础上改进。
 支持 GCP / Oracle / Vultr / 阿里云 / 腾讯云 等主流 VPS 环境。
 
@@ -160,5 +160,4 @@ MIT License © 2025
 - 在 GitHub 预览、VS Code、Typora、或 Gitea 中都能完美显示。  
 - 复制整段保存为 `README.md` 即可直接显示和复制菜单区分行内容。  
 
-是否希望我帮你再生成一个「README.zh_TW.md」版本（繁体显示 + 同步格式）？
 ```
