@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ====== 把下面 URL 改成你自己倉庫的 RAW 連結 ======
+# ====== 把下面 URL 改成你自己仓库的 RAW 链接 ======
 SCRIPT_URL="https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh"
 
-# ====== 全局變量 ======
+# ====== 全局变量 ======
 INSTALL_DIR="/opt/naive"
 SCRIPT_PATH="${INSTALL_DIR}/naive.sh"
 BIN_LINK="/usr/local/bin/naive"
@@ -14,7 +14,25 @@ CADDY_DIR="/etc/caddy"
 CADDYFILE="${CADDY_DIR}/Caddyfile"
 SERVICE_NAME="naive.service"
 
-# ====== 基礎工具 ======
+RED="\e[31m"
+NC="\e[0m"
+
+finish_msg() {
+  # 用红字提示“naive【某选项】完成，请重新执行naive”，然后退出
+  echo -e "${RED}naive【$1】完成，请重新执行 naive${NC}"
+  exit 0
+}
+
+uuid_gen() {
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  else
+    # 退路
+    tr -dc 'a-f0-9' </dev/urandom | head -c 8 && echo
+  fi
+}
+
+# ====== 基础工具 ======
 need_pkgs() {
   apt-get update -y
   apt-get install -y curl tar git ca-certificates iproute2 jq netcat-openbsd openssl
@@ -23,7 +41,7 @@ need_pkgs() {
   apt-get install -y nano || true
 }
 
-# ====== 自安裝為 /usr/local/bin/naive ======
+# ====== 自安装为 /usr/local/bin/naive ======
 self_install() {
   mkdir -p "$INSTALL_DIR"
   if [[ -n "${SCRIPT_URL}" ]]; then
@@ -36,13 +54,8 @@ self_install() {
   ln -sf "$SCRIPT_PATH" "$BIN_LINK"
 }
 
-# ====== 讀/寫 ENV ======
-load_env() {
-  if [[ -f "$ENV_FILE" ]]; then
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-  fi
-}
+# ====== 读/写 ENV ======
+load_env() { [[ -f "$ENV_FILE" ]] && source "$ENV_FILE"; }
 save_env() {
   cat >"$ENV_FILE" <<EOF
 DOMAIN="${DOMAIN}"
@@ -57,30 +70,30 @@ EOF
 ensure_go_xcaddy() {
   if ! command -v go >/dev/null 2>&1; then
     local GO_VER="1.22.7"
-    echo "安裝 Go ${GO_VER}…"
+    echo "安装 Go ${GO_VER}…"
     cd /tmp && curl -fsSLO "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz"
     rm -rf /usr/local/go && tar -C /usr/local -xzf "go${GO_VER}.linux-amd64.tar.gz"
     echo 'export PATH=/usr/local/go/bin:$PATH' >/etc/profile.d/go_path.sh
     export PATH=/usr/local/go/bin:$PATH
   fi
   if ! command -v xcaddy >/dev/null 2>&1; then
-    echo "安裝 xcaddy…"
+    echo "安装 xcaddy…"
     go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
     export PATH="$(go env GOPATH)/bin:$PATH"
     echo "export PATH=$(go env GOPATH)/bin:\$PATH" >/etc/profile.d/xcaddy_path.sh || true
   fi
 }
 
-# ====== 編譯 Caddy（forwardproxy 插件）======
+# ====== 编译 Caddy（forwardproxy 插件）======
 build_caddy() {
   local PLUGINS="--with github.com/caddyserver/forwardproxy"
   mkdir -p /opt/caddy-bin && cd /opt/caddy-bin
-  echo "編譯 Caddy（plugins: ${PLUGINS}）…"
+  echo "编译 Caddy（plugins: ${PLUGINS}）…"
   xcaddy build latest ${PLUGINS}
   install -m 0755 caddy "$CADDY_BIN"
 }
 
-# ====== 寫 Caddyfile ======
+# ====== 写 Caddyfile ======
 write_caddyfile() {
   mkdir -p "$CADDY_DIR" /var/www/html /var/lib/caddy
   id -u caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
@@ -98,7 +111,7 @@ HTML
 }
 
 ${DOMAIN}:${PORT} {
-  tls   # 交由 Caddy 自動申請/續簽（Let's Encrypt/ZeroSSL）
+  tls   # 交由 Caddy 自动申请/续签（Let's Encrypt/ZeroSSL）
   route {
     forward_proxy {
       basic_auth ${PROXY_USER} ${PROXY_PASS}
@@ -141,82 +154,113 @@ SERVICE
   systemctl daemon-reload
 }
 
-# ====== 伪外部探针 & DNS 預檢 ======
+# ====== 伪外部探针 & DNS 预检 ======
 precheck_dns_ports() {
   local PUB_IP DNS_IP
   PUB_IP="$(curl -4 -fsS ifconfig.me || true)"
-  if [[ -z "${PUB_IP}" ]]; then
-    echo "[錯誤] 無法獲取公網 IP，請檢查網絡。" ; return 1
-  fi
+  [[ -z "${PUB_IP}" ]] && { echo "[错误] 无法获取公网 IP"; return 1; }
   DNS_IP="$(dig +short "${DOMAIN}" A || true)"
-  echo "本機公網IP: ${PUB_IP}"
+  echo "本机公网IP: ${PUB_IP}"
   echo "域名解析IP: ${DNS_IP:-<空>}"
   if [[ -z "${DNS_IP}" || "${DNS_IP}" != "${PUB_IP}" ]]; then
     cat <<EOF
-[提示] 你的域名未正確指向當前 VM 公網 IP。
-  - 請在 DNS 面板添加/修改 A 記錄：
-      主機名: ${DOMAIN}
+[提示] 域名未正确指向当前 VM 公网 IP。
+  - 请在 DNS 面板设置 A 记录：
+      主机名: ${DOMAIN}
       值(IP): ${PUB_IP}
-  - 修改後等數分鐘再執行安裝。
+  - 修改后等待数分钟再执行安装。
 EOF
     return 1
   fi
 
-  # UFW 若啟用則放行
+  # UFW 若启用则放行
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     ufw allow 80/tcp || true
     ufw allow 443/tcp || true
     ufw allow "${PORT}"/tcp || true
   fi
 
-  echo "[預檢] 探測 80/443（僅作先驗參考）……"
+  echo "[预检] 探测 80/443（仅供参考）……"
   local ok80="false" ok443="false"
   if curl -I --connect-timeout 3 -m 5 -sS "http://${DOMAIN}" >/dev/null 2>&1; then
     ok80="true"
   else
-    if nc -z -w3 "${DOMAIN}" 80 >/dev/null 2>&1; then ok80="true"; fi
+    nc -z -w3 "${DOMAIN}" 80 >/dev/null 2>&1 && ok80="true"
   fi
-  if nc -z -w3 "${DOMAIN}" 443 >/dev/null 2>&1; then ok443="true"; fi
-  echo "  80/TCP 可達：$ok80"
-  echo "  443/TCP 可達：$ok443"
+  nc -z -w3 "${DOMAIN}" 443 >/dev/null 2>&1 && ok443="true"
+  echo "  80/TCP 可达：$ok80"
+  echo "  443/TCP 可达：$ok443"
   if [[ "$ok80" != "true" || "$ok443" != "true" ]]; then
     cat <<EOF
-[提醒] 預檢顯示 80/443 可能外部不可達（或當前未監聽）。這不一定是錯誤；
-       如安裝後 Caddy 首簽失敗，多半為 VPC 未放行 80/443。
+[提醒] 80/443 可能外部不可达（或暂未监听）。如安装后首次签证书失败，多半是 VPC 未放行 80/443。
 
-[可複製的 gcloud 命令（在你本地有權限環境執行；將 <PROJECT>/<NETWORK> 替換）]
+[可复制的 gcloud 命令（在你本地有权限环境执行；将 <PROJECT>/<NETWORK> 替换）]
   gcloud config set project <PROJECT>
   gcloud compute firewall-rules create allow-http  --allow tcp:80  --network=<NETWORK> --direction=INGRESS --priority=1000 --target-tags=http-https || true
   gcloud compute firewall-rules create allow-https --allow tcp:443 --network=<NETWORK> --direction=INGRESS --priority=1000 --target-tags=http-https || true
   gcloud compute firewall-rules create allow-naive --allow tcp:${PORT} --network=<NETWORK> --direction=INGRESS --priority=1000 --target-tags=naive || true
 
-[Console 路徑]
-  Google Cloud Console → VPC 網絡 → 防火牆 → 「創建防火牆規則」
-  建三條：
+[Console 路径]
+  Google Cloud Console → VPC 网络 → 防火墙 → “创建防火墙规则”
+  建三条：
     * allow-http  : TCP 80
     * allow-https : TCP 443
     * allow-naive : TCP ${PORT}
-  並把實例附上相應網絡標籤（如 http-https / naive）
+  并把实例附上相应网络标签（如 http-https / naive）
 EOF
   fi
 }
 
-# ====== 安裝 / 更新 ======
-install_or_update() {
-  echo "........... Naiveproxy 安裝向導 .........."
-  read -rp "域名（FQDN，例如 t26.netor.xyz）: " DOMAIN
-  read -rp "代理監聽端口（默認 2443，回車取默認）: " PORT
-  PORT="${PORT:-2443}"
-  read -rp "代理用戶名: " PROXY_USER
-  read -rp "代理密碼（強密碼）: " PROXY_PASS
-  read -rp "ACME 郵箱（證書聯繫郵箱）: " ACME_EMAIL
+# ====== 输入校验 ======
+validate_domain() {
+  # 简单校验：至少一处点、每段仅含字母数字连字符，且不以-开头/结尾
+  local d="$1"
+  [[ "$d" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]
+}
+validate_port() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  (( p>=1 && p<=65535 )) || return 1
+  (( p != 80 )) || return 1
+  return 0
+}
+validate_email() {
+  local m="$1"
+  [[ "$m" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]
+}
 
-  if [[ -z "${DOMAIN}" || -z "${PROXY_USER}" || -z "${PROXY_PASS}" || -z "${ACME_EMAIL}" ]]; then
-    echo "[錯誤] 參數不可為空。" ; return 1
-  fi
+# ====== 安装 / 更新 ======
+install_or_update() {
+  echo "........... Naiveproxy 安装向导 .........."
+
+  # 3) 域名提示（强化文案）
+  while true; do
+    read -rp $'请输入一个 正确的域名，一定一定一定要正确，不！能！出！错！\n（例如：n.abc.com）：' DOMAIN
+    if validate_domain "$DOMAIN"; then break; else echo -e "${RED}[错误] 域名格式不正确，请重新输入。${NC}"; fi
+  done
+
+  # 4) 端口提示（禁用80，默认2443，并提示需自行放开端口/防火墙）
+  while true; do
+    read -rp $'请输入NaiveProxy端口［1-65535］，不能选择80端口\n（默认端口：2443），设置其它端口时，需自行放开端口，例如增设防火墙规则：' PORT_IN
+    PORT="${PORT_IN:-2443}"
+    if validate_port "$PORT"; then break; else echo -e "${RED}[错误] 端口无效，请重输（1-65535 且不可为 80）。${NC}"; fi
+  done
+
+  # 折衷方案：用户名可留空默认 User；密码可留空自动生成
+  read -rp "代理用户名（留空则默认 User）： " PROXY_USER
+  PROXY_USER="${PROXY_USER:-User}"
+  read -rp "代理密码（留空则随机生成强密码）： " PROXY_PASS
+  PROXY_PASS="${PROXY_PASS:-$(uuid_gen)}"
+
+  # 5) 邮箱提示（强化文案）
+  while true; do
+    read -rp $'请输入一个 证书联系邮箱，邮箱不能乱输，格式要对。\n（例如：name@abc.com）：' ACME_EMAIL
+    if validate_email "$ACME_EMAIL"; then break; else echo -e "${RED}[错误] 邮箱格式不正确，请重新输入。${NC}"; fi
+  done
 
   need_pkgs
-  precheck_dns_ports || { echo "[中止] 預檢未通過。"; return 1; }
+  precheck_dns_ports || { echo -e "${RED}[中止] 预检未通过。${NC}"; finish_msg "安装/更新（预检失败）"; }
+
   ensure_go_xcaddy
   build_caddy
   write_caddyfile
@@ -225,39 +269,54 @@ install_or_update() {
 
   systemctl enable --now "${SERVICE_NAME}" || true
   sleep 2
+
+  # 输出与原脚本风格一致的信息块
+  echo
+  echo "........... Naiveproxy 配置信息  .........."
+  echo
+  echo "* 域名domain   = ${DOMAIN}"
+  echo "* 端口port     = ${PORT}"
+  echo "* 用户名user   = ${PROXY_USER}"
+  echo "* 密码password = ${PROXY_PASS}"
+  echo "* 邮箱email    = ${ACME_EMAIL}"
+  echo
   if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    echo "✅ 安裝/更新完成，服務已啟動。"
+    echo "✅ 服务已启动。"
   else
-    echo "⚠️ 服務未成功啟動，多半為 GCP VPC 未放行 80/443 → ACME 首簽失敗。"
-    echo "   放行端口後重試：systemctl restart ${SERVICE_NAME}"
-    echo "   查看日誌：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+    echo -e "${RED}⚠️ 服务未成功启动，多半为 VPC 未放行 80/443 → ACME 首签失败。${NC}"
+    echo "   放行端口后重试：systemctl restart ${SERVICE_NAME}"
+    echo "   查看日志：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
   fi
+
+  finish_msg "安装/更新"
 }
 
-# ====== 顯示信息 ======
+# ====== 显示信息 ======
 show_info() {
   load_env
   echo "........... Naiveproxy 配置信息 .........."
   echo "域名: ${DOMAIN:-<未配置>}"
   echo "端口: ${PORT:-<未配置>}"
-  echo "用戶: ${PROXY_USER:-<未配置>}"
-  echo "郵箱: ${ACME_EMAIL:-<未配置>}"
+  echo "用户: ${PROXY_USER:-<未配置>}"
+  echo "邮箱: ${ACME_EMAIL:-<未配置>}"
   echo "URL : https://${PROXY_USER:-user}:${PROXY_PASS:-pass}@${DOMAIN:-example}:${PORT:-2443}"
   echo
-  echo "........... NaiveProxy 服務狀態（按 q 退出） .........."
+  echo "........... NaiveProxy 服务状态（按 q 退出） .........."
   systemctl --no-pager -l status "${SERVICE_NAME}" || true
+  finish_msg "显示信息"
 }
 
-# ====== 修改配置（nano 打開 Caddyfile，保存後 reload） ======
+# ====== 修改配置（nano 打开 Caddyfile，保存后 reload） ======
 edit_config() {
   nano "$CADDYFILE"
   systemctl reload "${SERVICE_NAME}" || systemctl restart "${SERVICE_NAME}" || true
-  echo "[完成] 已重載/重啟。"
+  echo "[完成] 已重载/重启。"
+  finish_msg "修改配置"
 }
 
-# ====== 優化：啟用 BBR + fq ======
+# ====== 优化：启用 BBR + fq ======
 optimize_bbr() {
-  echo "........... 啟用 BBR/FQ .........."
+  echo "........... 启用 BBR/FQ .........."
   sysctl -w net.core.default_qdisc=fq
   sysctl -w net.ipv4.tcp_congestion_control=bbr
   {
@@ -265,29 +324,30 @@ optimize_bbr() {
     grep -q "^net.ipv4.tcp_congestion_control" /etc/sysctl.conf && sed -i 's/^net\.ipv4\.tcp_congestion_control.*/net.ipv4.tcp_congestion_control=bbr/' /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.conf
   } || true
   sysctl -p || true
-  echo "✅ BBR/FQ 已設置。"
+  echo "✅ BBR/FQ 已设置。"
+  finish_msg "优化(BBR)"
 }
 
-# ====== 證書詳情（多證書清單 + 剩餘天數） ======
+# ====== 证书详情（多证书清单 + 剩余天数） ======
 cert_info() {
-  echo "........... 證書詳情 Cert Info（多證書）.........."
+  echo "........... 证书详情 Cert Info（多证书）.........."
   local CERT_BASE="/var/lib/caddy/.local/share/caddy/certificates"
   local now_ts crt_list tmpfile
   now_ts="$(date +%s)"
   tmpfile="$(mktemp)"
 
   if [[ ! -d "$CERT_BASE" ]]; then
-    echo "未找到 Caddy 證書目錄：$CERT_BASE"
-    echo "提示：首次簽發未成功時可能尚未生成證書（多為 80/443 未放行）。"
+    echo "未找到 Caddy 证书目录：$CERT_BASE"
+    echo "提示：首次签发未成功时可能尚未生成证书（多为 80/443 未放行）。"
     rm -f "$tmpfile"
-    return 0
+    finish_msg "证书详情"
   fi
 
   mapfile -t crt_list < <(find "$CERT_BASE" -type f -name '*.crt' -print 2>/dev/null)
   if (( ${#crt_list[@]} == 0 )); then
-    echo "尚未找到任何 *.crt 證書文件。"
+    echo "尚未找到任何 *.crt 证书文件。"
     rm -f "$tmpfile"
-    return 0
+    finish_msg "证书详情"
   fi
 
   printf "%-40s  %-22s  %-24s  %-8s  %s\n" "Domain" "Expires(UTC)" "Issuer" "Days" "Path"
@@ -298,67 +358,64 @@ cert_info() {
     SUBJECT="$(openssl x509 -in "$CRT" -noout -subject 2>/dev/null | sed 's/^subject= *//')"
     ISSUER="$(openssl x509 -in "$CRT" -noout -issuer  2>/dev/null | sed 's/^issuer= *//')"
     EDATE="$(openssl x509 -in "$CRT" -noout -enddate 2>/dev/null | cut -d= -f2)"
-
     domain="$(echo "$SUBJECT" | sed -n 's/.*CN=\([^\/,]*\).*/\1/p')"
     if [[ -z "$domain" ]]; then
       domain="$(echo "$CRT" | sed -n 's#.*/certificates/.*\/\([^/]*\)\.crt$#\1#p')"
       [[ -z "$domain" ]] && domain="(unknown)"
     fi
-
     exp_ts="$(date -u -d "$EDATE" +%s 2>/dev/null || true)"
     [[ -z "$exp_ts" ]] && continue
     days_left=$(( (exp_ts - now_ts) / 86400 ))
-
     local issuer_short
     issuer_short="$(echo "$ISSUER" | sed -E 's/.+CN=([^,/]+).*/\1/; s/,.*//')"
     [[ -z "$issuer_short" ]] && issuer_short="$ISSUER"
-
     printf "%s|%s|%s|%s|%s|%s\n" "$exp_ts" "$domain" "$EDATE" "$issuer_short" "$days_left" "$CRT" >>"$tmpfile"
   done
 
   if [[ -s "$tmpfile" ]]; then
     sort -n "$tmpfile" | while IFS='|' read -r exp_ts domain EDATE issuer_short days_left path; do
       local mark=""
-      if [[ "$days_left" =~ ^-?[0-9]+$ ]]; then
-        if (( days_left <= 10 )); then mark="⚠️"; fi
-      fi
+      if [[ "$days_left" =~ ^-?[0-9]+$ ]] && (( days_left <= 10 )); then mark="⚠️"; fi
       printf "%-40s  %-22s  %-24s  %3s 天  %s %s\n" "$domain" "$(date -u -d "@$exp_ts" '+%Y-%m-%d %H:%M:%S')" "$issuer_short" "$days_left" "$mark" "$path"
     done
   else
-    echo "未能解析到任何有效證書。"
+    echo "未能解析到任何有效证书。"
   fi
 
   rm -f "$tmpfile"
   echo
-  echo "提示：Caddy 會在到期前自動續簽（預設使用 HTTP-01/TLS-ALPN-01）。"
-  echo "     若續簽失敗，最常見原因：GCP VPC 未放行 80/443 或 DNS 未正確指向。"
-  echo "     可手動重試：systemctl restart ${SERVICE_NAME}"
-  echo "     查日誌：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+  echo "提示：Caddy 会在到期前自动续签（默认使用 HTTP-01/TLS-ALPN-01）。"
+  echo "     若续签失败，最常见原因：GCP VPC 未放行 80/443 或 DNS 未正确指向。"
+  echo "     可手动重试：systemctl restart ${SERVICE_NAME}"
+  echo "     查日志：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+  finish_msg "证书详情"
 }
 
-# ====== 證書續簽（重啟觸發重試） ======
+# ====== 证书续签（重启触发重试） ======
 cert_renew() {
   systemctl restart "${SERVICE_NAME}" || true
-  echo "已重啟服務；如 80/443 可達，Caddy 會自動處理簽發/續簽。"
-  echo "查看日誌：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+  echo "已重启服务；如 80/443 可达，Caddy 会自动处理签发/续签。"
+  echo "查看日志：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+  finish_msg "证书续签"
 }
 
-# ====== 更新腳本 ======
+# ====== 更新脚本 ======
 script_renew() {
   if [[ -z "$SCRIPT_URL" ]]; then
-    echo "[錯誤] 未配置 SCRIPT_URL，無法自更新。"
-    return 1
+    echo "[错误] 未配置 SCRIPT_URL，无法自更新。"
+    finish_msg "更新脚本（失败）"
   fi
   curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"
   chmod +x "$SCRIPT_PATH"
   ln -sf "$SCRIPT_PATH" "$BIN_LINK"
-  echo "✅ 腳本已更新為最新版本。"
+  echo "✅ 脚本已更新为最新版本。"
+  finish_msg "更新脚本"
 }
 
-# ====== 重啟 / 啟停 / 卸載 ======
-restart_service() { systemctl restart "${SERVICE_NAME}" || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; }
-start_service()   { systemctl start "${SERVICE_NAME}"   || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; }
-stop_service()    { systemctl stop "${SERVICE_NAME}"    || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; }
+# ====== 重启 / 启停 / 卸载 ======
+restart_service() { systemctl restart "${SERVICE_NAME}" || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; finish_msg "重启"; }
+start_service()   { systemctl start "${SERVICE_NAME}"   || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; finish_msg "启动"; }
+stop_service()    { systemctl stop "${SERVICE_NAME}"    || true; systemctl status "${SERVICE_NAME}" --no-pager -l || true; finish_msg "停止"; }
 uninstall_all() {
   stop_service || true
   systemctl disable "${SERVICE_NAME}" || true
@@ -369,10 +426,11 @@ uninstall_all() {
   rm -f "$ENV_FILE"
   rm -f "$BIN_LINK"
   rm -rf "$INSTALL_DIR"
-  echo "✅ 已卸載。"
+  echo "✅ 已卸载。"
+  finish_msg "卸载"
 }
 
-# ====== 選單 ======
+# ====== 菜单 ======
 menu() {
   clear
   cat <<'MENU'
@@ -388,6 +446,8 @@ menu() {
 9．卸载 Uninstall
 请选择［1-9］：
 MENU
+  # 每次显示菜单后，用红字提示“naive 命令安装完毕，请使用 naive 进行操作。”
+  echo -e "${RED}naive 命令安装完毕，请使用 naive 进行操作。${NC}"
   read -r choice
   case "$choice" in
     1) install_or_update ;;
@@ -399,20 +459,17 @@ MENU
     7) script_renew ;;
     8) restart_service ;;
     9) uninstall_all ;;
-    *) echo "无效选择" ;;
+    *) echo "无效选择"; finish_msg "无效选择" ;;
   esac
-  echo
-  read -rp "按回车返回菜单..." _
-  menu
 }
 
 # ====== 主入口 ======
 main() {
-  # 首次執行：安裝命令並提示
+  # 首次执行：安装命令并提示
   if [[ "${1:-}" != "internal" ]]; then
     need_pkgs
     self_install
-    echo "naive 命令安装完毕，请使用 naive 进行操作。"
+    echo -e "${RED}naive 命令安装完毕，请使用 naive 进行操作。${NC}"
     exec "$BIN_LINK" internal
   else
     load_env || true
@@ -420,9 +477,9 @@ main() {
   fi
 }
 
-# ====== 系統/發行版檢查 ======
-if [[ $EUID -ne 0 ]]; then echo "請用 root 运行（sudo -i）"; exit 1; fi
-if [[ -f /etc/os-release ]]; then . /etc/os-release; else echo "無法識別系統發行版"; exit 1; fi
-case "${ID:-}" in ubuntu|debian) ;; *) echo "僅支持 Debian/Ubuntu"; exit 1;; esac
+# ====== 系统/发行版检查 ======
+if [[ $EUID -ne 0 ]]; then echo "请用 root 运行（sudo -i）"; exit 1; fi
+if [[ -f /etc/os-release ]]; then . /etc/os-release; else echo "无法识别系统发行版"; exit 1; fi
+case "${ID:-}" in ubuntu|debian) ;; *) echo "仅支持 Debian/Ubuntu"; exit 1;; esac
 
 main "$@"
