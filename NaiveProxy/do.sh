@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ====== 把下面 URL 改成你自己仓库的 RAW 链接 ======
+# ====== 把下面 URL 改成你自己仓库的 RAW 链接（必改） ======
 SCRIPT_URL="https://raw.githubusercontent.com/janelai2022/nas_tools/main/NaiveProxy/do.sh"
 
 # ====== 全局变量 ======
@@ -25,12 +25,11 @@ uuid_gen() {
   if [[ -r /proc/sys/kernel/random/uuid ]]; then
     cat /proc/sys/kernel/random/uuid
   else
-    tr -dc 'a-f0-9' </dev/urandom | head -c 32
-    echo
+    tr -dc 'a-f0-9' </dev/urandom | head -c 32; echo
   fi
 }
 
-# ====== 工具与依赖（仅装缺的） ======
+# ====== 仅装缺少的依赖 ======
 install_if_missing() { local pkg cmd; pkg="$1"; cmd="$2"; command -v "$cmd" >/dev/null 2>&1 || apt-get install -y "$pkg"; }
 need_pkgs() {
   apt-get update -y
@@ -47,19 +46,37 @@ need_pkgs() {
   install_if_missing nano nano || true
 }
 
-# ====== 自安装 ======
+# ====== 自安装（下载本体 + 写 wrapper，带校验） ======
 self_install() {
   mkdir -p "$INSTALL_DIR"
-  curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"
-  chmod +x "$SCRIPT_PATH"
-  cat >"$WRAPPER_BIN" <<EOF
+
+  if [[ "$SCRIPT_URL" == *"<YOUR_GITHUB>"* || "$SCRIPT_URL" == *"<你的GitHub账号>"* ]]; then
+    echo -e "${RED}[错误] SCRIPT_URL 仍是占位符，请先替换为你仓库的 RAW 链接。${NC}"
+    echo "示例：https://raw.githubusercontent.com/<你的GitHub账号>/nas_tools/main/NaiveProxy/do.sh"
+    exit 1
+  fi
+
+  local tmpf; tmpf="$(mktemp)"; trap 'rm -f "$tmpf"' EXIT
+  if ! curl -fsSL "$SCRIPT_URL" -o "$tmpf"; then
+    echo -e "${RED}[错误] 无法下载 $SCRIPT_URL，请检查网络/链接是否正确。${NC}"; exit 1
+  fi
+  sed -i 's/\r$//' "$tmpf"
+  local sz; sz="$(wc -c <"$tmpf" || echo 0)"
+  if (( sz < 8192 )); then
+    echo -e "${RED}[错误] 下载到的脚本体积异常（${sz}B < 8KB），多半是 RAW 链接不对或仓库未更新。${NC}"
+    exit 1
+  fi
+  install -m 0755 "$tmpf" "$SCRIPT_PATH"
+
+  # wrapper 用绝对路径 + 原样 heredoc，最稳
+  cat >"$WRAPPER_BIN" <<'WRAP'
 #!/usr/bin/env bash
-exec "$SCRIPT_PATH" internal "\$@"
-EOF
+exec /opt/naive/naive.sh internal "$@"
+WRAP
   chmod +x "$WRAPPER_BIN"
 }
 
-# ====== 读写环境变量 ======
+# ====== 读写 ENV ======
 load_env() { [[ -f "$ENV_FILE" ]] && source "$ENV_FILE" || true; }
 save_env() {
   cat >"$ENV_FILE" <<EOF
@@ -71,7 +88,7 @@ ACME_EMAIL="${ACME_EMAIL}"
 EOF
 }
 
-# ====== 打印配置信息 ======
+# ====== 打印配置信息（原脚本风格） ======
 print_config_block() {
   echo "* ........... Naiveproxy 配置信息  .........."
   echo "*"
@@ -83,7 +100,7 @@ print_config_block() {
   echo "* 邮箱email    = ${ACME_EMAIL}"
 }
 
-# ====== 检测 caddy forwardproxy 插件 ======
+# ====== 检测是否已有带 forwardproxy 的 Caddy ======
 has_caddy_forwardproxy() {
   if [[ -x "$CADDY_BIN" ]]; then
     "$CADDY_BIN" list-modules | grep -q "caddyserver/forwardproxy" && return 0
@@ -91,11 +108,11 @@ has_caddy_forwardproxy() {
   return 1
 }
 
-# ====== Go / xcaddy ======
+# ====== 仅在需要时安装 Go/xcaddy 并编译 Caddy ======
 ensure_go_xcaddy_if_needed() {
   has_caddy_forwardproxy && return 0
   if ! command -v go >/dev/null 2>&1; then
-    GO_VER="1.22.7"
+    local GO_VER="1.22.7"
     echo "安装 Go ${GO_VER}..."
     cd /tmp && curl -fsSLO "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz"
     rm -rf /usr/local/go && tar -C /usr/local -xzf "go${GO_VER}.linux-amd64.tar.gz"
@@ -109,7 +126,6 @@ ensure_go_xcaddy_if_needed() {
   fi
 }
 
-# ====== 编译 Caddy ======
 build_caddy_if_needed() {
   has_caddy_forwardproxy && { echo "✅ 已存在带 forwardproxy 的 Caddy，跳过编译。"; return; }
   echo "编译 Caddy（带 forwardproxy 插件）..."
@@ -118,11 +134,12 @@ build_caddy_if_needed() {
   install -m 0755 caddy "$CADDY_BIN"
 }
 
-# ====== 写入 Caddyfile ======
+# ====== 写入 Caddyfile（修正 tls 语法为区块 tls { }） ======
 write_caddyfile() {
   mkdir -p "$CADDY_DIR" /var/www/html /var/lib/caddy
   id -u caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy
   chown -R caddy:caddy /var/www/html /var/lib/caddy || true
+
   cat >/var/www/html/index.html <<'HTML'
 <!doctype html><meta charset="utf-8"><title>Welcome</title>
 <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:40px;line-height:1.6}</style>
@@ -135,7 +152,9 @@ HTML
 }
 
 ${DOMAIN}:${PORT} {
-  tls
+  tls {
+    # enable automatic HTTPS on a custom port
+  }
   route {
     forward_proxy {
       basic_auth ${PROXY_USER} ${PROXY_PASS}
@@ -151,7 +170,7 @@ EOF
   chown -R caddy:caddy "$CADDY_DIR"
 }
 
-# ====== systemd 服务 ======
+# ====== systemd 服务（允许绑定 80/443） ======
 write_service() {
   cat >/etc/systemd/system/${SERVICE_NAME} <<'SERVICE'
 [Unit]
@@ -164,6 +183,11 @@ User=caddy
 Group=caddy
 ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+NoNewPrivileges=true
 Restart=on-failure
 LimitNOFILE=1048576
 
@@ -173,10 +197,10 @@ SERVICE
   systemctl daemon-reload
 }
 
-# ====== 校验输入 ======
+# ====== 输入校验 ======
 validate_domain() { [[ "$1" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; }
-validate_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 && $1 != 80 )); }
-validate_email() { [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
+validate_port()   { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 && $1 != 80 )); }
+validate_email()  { [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
 
 # ====== 安装/更新 ======
 install_or_update() {
@@ -212,6 +236,7 @@ install_or_update() {
 
   systemctl enable --now "${SERVICE_NAME}" || true
   sleep 2
+
   echo
   print_config_block
   echo
@@ -219,7 +244,7 @@ install_or_update() {
   if systemctl is-active --quiet "${SERVICE_NAME}"; then
     echo "✅ 服务已启动。"
   else
-    echo -e "${RED}⚠️ 服务未成功启动，可能为80/443未放行或证书验证失败。${NC}"
+    echo -e "${RED}⚠️ 服务未成功启动，可能为 80/443 未放行、CF 橙云未关闭或证书验证失败。${NC}"
   fi
 
   pause_and_return "安装/更新"
@@ -235,13 +260,13 @@ show_info() {
 }
 
 # ====== 其它功能 ======
-edit_config() { nano "$CADDYFILE"; systemctl reload "${SERVICE_NAME}" || systemctl restart "${SERVICE_NAME}"; pause_and_return "修改配置"; }
-optimize_bbr() { sysctl -w net.core.default_qdisc=fq; sysctl -w net.ipv4.tcp_congestion_control=bbr; pause_and_return "优化(BBR)"; }
-cert_info() { openssl x509 -noout -enddate -in /var/lib/caddy/.local/share/caddy/certificates/*/*/*.crt 2>/dev/null; pause_and_return "证书详情"; }
-cert_renew() { systemctl restart "${SERVICE_NAME}"; pause_and_return "证书续签"; }
-script_renew() { curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"; chmod +x "$SCRIPT_PATH"; pause_and_return "更新脚本"; }
-restart_service() { systemctl restart "${SERVICE_NAME}"; systemctl status "${SERVICE_NAME}" --no-pager -l; pause_and_return "重启"; }
-uninstall_all() { systemctl stop "${SERVICE_NAME}"; systemctl disable "${SERVICE_NAME}"; rm -rf "$INSTALL_DIR" "$CADDY_DIR" "$ENV_FILE" "$WRAPPER_BIN"; echo "✅ 已卸载。"; }
+edit_config()      { nano "$CADDYFILE"; systemctl reload "${SERVICE_NAME}" || systemctl restart "${SERVICE_NAME}"; pause_and_return "修改配置"; }
+optimize_bbr()     { sysctl -w net.core.default_qdisc=fq; sysctl -w net.ipv4.tcp_congestion_control=bbr; pause_and_return "优化(BBR)"; }
+cert_info()        { find /var/lib/caddy/.local/share/caddy/certificates -type f -name '*.crt' -print 2>/dev/null | xargs -r -I{} bash -lc 'd=$(openssl x509 -in "{}" -noout -enddate|cut -d= -f2); echo "{} -> $d"'; pause_and_return "证书详情"; }
+cert_renew()       { systemctl restart "${SERVICE_NAME}"; pause_and_return "证书续签"; }
+script_renew()     { curl -fsSL "$SCRIPT_URL" -o "$SCRIPT_PATH"; chmod +x "$SCRIPT_PATH"; pause_and_return "更新脚本"; }
+restart_service()  { systemctl restart "${SERVICE_NAME}"; systemctl status "${SERVICE_NAME}" --no-pager -l; pause_and_return "重启"; }
+uninstall_all()    { systemctl stop "${SERVICE_NAME}" || true; systemctl disable "${SERVICE_NAME}" || true; rm -rf "$INSTALL_DIR" "$CADDY_DIR" "$ENV_FILE" "$WRAPPER_BIN"; echo "✅ 已卸载。"; }
 
 # ====== 菜单 ======
 menu() {
