@@ -1,4 +1,3 @@
-````markdown
 # 🌐 NaiveProxy 一键安装与管理脚本
 
 基于 Caddy + ForwardProxy 插件的 HTTPS 代理自动化部署方案，  
