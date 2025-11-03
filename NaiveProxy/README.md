@@ -66,6 +66,7 @@ naive
 请选择［1-9］：
 
 📜 功能详解
+
 1️⃣ 安装 / 更新
 
 自动安装 Caddy、ForwardProxy 插件；
